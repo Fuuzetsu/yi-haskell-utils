@@ -54,6 +54,35 @@ breakType (HDT (_, cs)) =
 
     mkv n = unwords $ zipWith (\x y -> x : show y) (replicate n 'x') [1 .. ]
 
+-- | If possible, naively case splits at the variable at point.
+--
+-- Warning: it will at the moment naively duplicate the line and make the
+-- replacement, whether it makes sense for it to do so or not!
+caseSplitAtPoint :: YiM ()
+caseSplitAtPoint = do
+  t <- getTypeAtPoint
+  case t >>= breakType of
+    Left e -> msgEditor e
+    Right [] -> return ()
+    Right xs -> do
+      cc <- withBuffer curCol
+      cl <- withBuffer curLn
+      let (y:ys) = reverse xs
+          -- We don't duplicate line for last case
+          act = reverse $ (y, return ()) : zip ys (repeat duplicateUnder)
+
+      mapM_ (f cc) act
+      withBuffer $ moveToLineColB cl cc
+      fwriteE -- save after splits
+  where
+    f c (case', a) = do
+      _ <- a
+      withBuffer $ do
+        bkillWordB
+        insertN case'
+        lineDown
+        moveToColB c
+
 {- |
 Duplicates the current line down. Denoting the cursor
 with the ‘|’ character:
