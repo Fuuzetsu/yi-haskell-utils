@@ -24,4 +24,4 @@ library
   exposed-modules:     Yi.Mode.Haskell.Utils
   other-modules:       Yi.Mode.Haskell.Utils.Internal
 
-  build-depends:       base >=4.6 && <4.7, yi >=0.7
+  build-depends:       base >=4.6 && <4.7, yi >=0.7, split
