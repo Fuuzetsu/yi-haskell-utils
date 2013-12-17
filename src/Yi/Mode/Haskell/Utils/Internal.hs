@@ -54,6 +54,34 @@ breakType (HDT (_, cs)) =
 
     mkv n = unwords $ zipWith (\x y -> x : show y) (replicate n 'x') [1 .. ]
 
+{- |
+Duplicates the current line down. Denoting the cursor
+with the ‘|’ character:
+
+@
+foo
+ba|r
+baz
+@
+
+would become
+
+@
+foo
+ba|r
+bar
+baz
+@
+-}
+duplicateUnder :: YiM ()
+duplicateUnder = do
+  withBuffer $ do
+    cc <- curCol -- remember column position
+    curL <- curLn
+    cl <- readLnB -- get current line
+    moveToSol >> lineDown >> newlineB >> lineUp -- make space
+    insertN cl -- insert our copied line
+    moveToLineColB curL cc
 
 -- | Uses GhcMod to get the type of the thing at point
 getTypeAtPoint :: YiM (Either String HType)
