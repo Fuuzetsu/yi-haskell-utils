@@ -13,7 +13,9 @@ import           Data.Char (isDigit)
 import           Data.List
 import           Data.List.Split
 import           Text.Read (readMaybe)
+import           Language.Haskell.GhcMod
 import           Yi hiding (foldl, (.), notElem, mapM, mapM_)
+import           Yi.IReader (getBufferContents)
 import qualified Yi.Mode.Interactive as Interactive
 
 -- | Function name and string representing the type.
@@ -26,6 +28,89 @@ type HConstr = (String, Int)
 -- | Data type name and list of its constructors. We don't particurarly
 -- care for the parameters to the data type for now.
 type HDataType = (String, [HConstr])
+
+data HType = HList | HChar | HDT HDataType
+           | HNum | HFunc | HT HDataType deriving (Show, Eq)
+
+getModuleName :: YiM (Either String ModuleString)
+getModuleName = do
+  c <- filter ("module " `isPrefixOf`) . lines <$> withBuffer getBufferContents
+  return $ case c of
+    [] -> Left "Couldn't find the module name in the file."
+    (x:_) -> Right . takeWhile (/= ' ') . tail $ dropWhile (/= ' ') x
+
+-- | Decide how to possible break up the types.
+-- For now we just blindly insert identifiers.
+breakType :: HType -> Either String [String]
+breakType HList = Right ["[]", "(x:xs)"]
+breakType HChar = Left "Can't case-split on a character type."
+breakType HNum = Left "Can't case-split on a number type."
+breakType HFunc = Left "Can't case-split on functions."
+breakType (HDT (_, cs)) =
+  Right $ map repArgs cs
+  where
+    repArgs (cn, 0) = cn
+    repArgs (cn, ar) = "(" ++ cn ++ " " ++ mkv ar ++ ")"
+
+    mkv n = unwords $ zipWith (\x y -> x : show y) (replicate n 'x') [1 .. ]
+
+
+-- | Uses GhcMod to get the type of the thing at point
+getTypeAtPoint :: YiM (Either String HType)
+getTypeAtPoint = do
+  mn <- getModuleName
+  case mn of
+    Left err -> return $ Left err
+    Right n -> do
+      c <- io findCradle
+      BufferFileInfo fn _ ln cl _ _ _ <- withBuffer bufInfoB
+      msgEditor $ fn ++ ":" ++ n ++ ":" ++ show ln ++ ":" ++ show cl
+      ts <- io $ typeExpr defaultOptions c fn n ln cl
+      if ":Error:" `isInfixOf` ts
+        then return $ Left ts
+        else case lines ts of
+         [] -> return $ Left "No value at point."
+         x:_ -> do
+           msgEditor $ "x: " ++ x
+           let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
+           msgEditor $ "t: " ++ t
+           case head $ words t of
+             '[':_ -> return $ Right HList
+             x' -> if "->" `isInfixOf` t -- function pre-split
+                   then return $ Right HFunc
+                   else do
+                     msgEditor $ fn ++ " -- " ++ n ++ " -- " ++ x'
+                     inf <- io $ getTypeInfo defaultOptions c fn n x'
+                     return $ if ":Error:" `isInfixOf` inf
+                       then Left inf
+                       else Right . processType . extractDataType $ lines inf
+
+-- | Wrapper around 'infoExpr' which will follow ‘type’ declarations before
+-- settling for something.
+getTypeInfo :: Options -> Cradle -> FilePath -> ModuleString
+            -> Expression -> IO String
+getTypeInfo o c fp m e = do
+  inf <- infoExpr o c fp m e
+  let tname = fst . extractDataType $ lines inf
+  if "type " `isPrefixOf` inf
+    then infoExpr o c fp m tname
+    else return inf
+
+-- | Here we further process the type returned to us. We can't case split on
+-- on everything and GhcMod won't take anything paramerised to begin with
+-- so we try to catch some basic types here.
+processType :: HDataType -> HType
+processType ('[':_, _) = HList
+processType ('I':'n':'t':_, _) = HNum -- false positives ahoy
+processType ("Float", _) = HNum
+processType ("Double", _) = HNum
+processType ("Point", _) = HNum
+processType ("Size", _) = HNum
+processType ("Char", _) = HChar
+processType dt
+  | "->" `isInfixOf` fst dt = HFunc
+  | otherwise = HDT dt
+
 
 -- | Asks GHCi about the location of a function definition in the file.
 -- We use this as a helper for 'ghciInsertMissingTypes'
@@ -57,8 +142,11 @@ extractFunctions = filtFuncs fs . joinSplits
 -- TODO: Record types
 extractDataType :: [String] -> HDataType
 extractDataType xs =
-  let typeStart =
-        dropWhile (\x -> not $ "data " `isPrefixOf` x) $ map dropComment xs
+  let notDoT x = not $ "data " `isPrefixOf` x
+                       || "type " `isPrefixOf` x
+                       || "newtype " `isPrefixOf` x
+      typeStart =
+        dropWhile notDoT $ map dropComment xs
       cleanContent = map words (joinSplits typeStart)
       (_:c:rest) = head cleanContent
       ctors = drop 1 $ dropWhile (/= "=") rest
@@ -95,7 +183,7 @@ joinSplits (x:xs) = Prelude.foldl comb [x] xs
 
 test :: [String]
 test =
-  [ "data Maybe a = Nothing | Just a        -- Defined in `Data.Maybe'"
+  [ "type Maybe a = Nothing | Just a        -- Defined in `Data.Maybe'"
   , "  | Fake a b c"
   , "  | SuperFake a"
   , "  | LastFake"
@@ -113,3 +201,34 @@ test =
   , "  -- Defined in `binary-0.5.1.1:Data.Binary'"
   , "instance Alternative Maybe -- Defined in `Control.Applicative'"
   ]
+
+
+testM = [ "-- You should have received a copy of the GNU General Public License"
+        , "-- along with this program.  If not, see <http://www.gnu.org/licenses/>."
+        , ""
+        , "-- |"
+        , "-- Module      :  Main"
+        , "-- Description :  Coursework 2 submission for CM20219 course ran in"
+        , "--                University of Bath in 2013. Submission by mk440"
+        , "-- Copyright   :  (c) Mateusz Kowalczyk 2013"
+        , "-- License     :  GPLv3"
+        , "-- Maintainer  :  fuuzetsu@fuuzetsu.co.uk"
+        , ""
+        , "{-# LANGUAGE TemplateHaskell, FlexibleInstances, MultiParamTypeClasses #-}"
+        , "{-# OPTIONS_GHC -fno-warn-orphans #-}"
+        , "module Main where"
+        , ""
+        , ""
+        , "import Control.Applicative"
+        , "import Control.Monad"
+        , "import Control.Lens"
+        , "import Data.Time.Clock"
+        , "import Graphics.Rendering.OpenGL"
+        , "import Graphics.UI.GLUT"
+        , "import Data.IORef"
+        , "import System.Exit"
+        , ""
+        , "-- | Specifies a glVertex3f from a 'GLfloat' triple."
+        , "vertex3f :: (GLfloat, GLfloat, GLfloat) -> IO ()"
+        , "vertex3f (x, y, z) = vertex $ Vertex3 x y z"
+        ]
