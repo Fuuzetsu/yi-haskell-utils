@@ -9,13 +9,15 @@
 module Yi.Mode.Haskell.Utils
        ( ghciLoadBufferBool
        , ghciInsertMissingTypes
+       , getTypeAtPoint
+       , caseSplitAtPoint
        )
        where
 
 import           Data.List
 import           Data.Maybe (catMaybes)
 import           Yi hiding (foldl, (.), notElem, mapM, mapM_)
-import           Yi.IReader (getBufferContents)
+import           Yi.Buffer.Misc (elemsB)
 import qualified Yi.Mode.Interactive as Interactive
 import           Yi.Mode.Haskell.Utils.Internal
 
@@ -41,7 +43,7 @@ ghciInsertMissingTypes = do
     True -> do
       buf <- ghciGet
       result <- Interactive.queryReply buf ":browse"
-      bufContent <- withBuffer getBufferContents
+      bufContent <- withBuffer elemsB
       let funcs = extractFunctions $ lines result
           bufferFuncs = extractFunctions $ lines bufContent
           bufFuncNames = map fst bufferFuncs

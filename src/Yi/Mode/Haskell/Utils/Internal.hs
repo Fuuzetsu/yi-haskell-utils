@@ -15,7 +15,7 @@ import           Data.List.Split
 import           Text.Read (readMaybe)
 import           Language.Haskell.GhcMod
 import           Yi hiding (foldl, (.), notElem, mapM, mapM_)
-import           Yi.IReader (getBufferContents)
+import           Yi.Buffer.Misc (elemsB)
 import qualified Yi.Mode.Interactive as Interactive
 
 -- | Function name and string representing the type.
@@ -34,7 +34,7 @@ data HType = HList | HChar | HDT HDataType
 
 getModuleName :: YiM (Either String ModuleString)
 getModuleName = do
-  c <- filter ("module " `isPrefixOf`) . lines <$> withBuffer getBufferContents
+  c <- filter ("module " `isPrefixOf`) . lines <$> withBuffer elemsB
   return $ case c of
     [] -> Left "Couldn't find the module name in the file."
     (x:_) -> Right . takeWhile (/= ' ') . tail $ dropWhile (/= ' ') x
