@@ -14,10 +14,12 @@ module Yi.Mode.Haskell.Utils
        )
        where
 
+import           Control.Applicative ((<$>))
+import           Data.Function (on)
 import           Data.List
 import           Data.Maybe (catMaybes)
-import           Yi hiding (foldl, (.), notElem, mapM, mapM_)
-import           Yi.Buffer.Misc (elemsB)
+import           Yi
+import           Yi.Monad (gets)
 import qualified Yi.Mode.Interactive as Interactive
 import           Yi.Mode.Haskell.Utils.Internal
 
