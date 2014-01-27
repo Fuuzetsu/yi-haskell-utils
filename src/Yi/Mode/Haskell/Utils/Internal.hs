@@ -31,7 +31,7 @@ type HConstr = (String, Int)
 type HDataType = (String, [HConstr])
 
 data HType = HList | HChar | HDT HDataType
-           | HNum | HFunc | HT HDataType deriving (Show, Eq)
+           | HNum | HFunc deriving (Show, Eq)
 
 getModuleName :: YiM (Either String ModuleString)
 getModuleName = do
