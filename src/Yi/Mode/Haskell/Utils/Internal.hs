@@ -8,14 +8,15 @@
 
 module Yi.Mode.Haskell.Utils.Internal where
 
+import           Control.Applicative ((<$>))
 import           Control.Monad (liftM)
 import           Data.Char (isDigit)
 import           Data.List
 import           Data.List.Split
 import           Text.Read (readMaybe)
 import           Language.Haskell.GhcMod
-import           Yi hiding (foldl, (.), notElem, mapM, mapM_)
-import           Yi.Buffer.Misc (elemsB)
+import           Yi
+import           Yi.Utils (io)
 import qualified Yi.Mode.Interactive as Interactive
 
 -- | Function name and string representing the type.
