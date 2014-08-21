@@ -120,39 +120,43 @@ getTypeAtPoint = do
   case mn of
     Left err -> return $ Left err
     Right n -> do
-      c <- io findCradle
       BufferFileInfo fn _ ln cl _ _ _ <- withBuffer bufInfoB
       msgEditor $ fn ++ ":" ++ n ++ ":" ++ show ln ++ ":" ++ show cl
-      ts <- io $ typeExpr defaultOptions c fn n ln cl
-      if ":Error:" `isInfixOf` ts
-        then return $ Left ts
-        else case lines ts of
-         [] -> return $ Left "No value at point."
-         x:_ -> do
-           msgEditor $ "x: " ++ x
-           let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
-           msgEditor $ "t: " ++ t
-           case head $ words t of
-             '[':_ -> return $ Right HList
-             x' -> if "->" `isInfixOf` t -- function pre-split
-                   then return $ Right HFunc
-                   else do
-                     msgEditor $ fn ++ " -- " ++ n ++ " -- " ++ x'
-                     inf <- io $ getTypeInfo defaultOptions c fn n x'
-                     return $ if ":Error:" `isInfixOf` inf
-                       then Left inf
-                       else Right . processType . extractDataType $ lines inf
+      (ts, _) <- io $ runGhcModT defaultOptions (types fn ln cl)
+      case ts of
+        Left GMENoMsg -> return $ Left "ghc-mod failed with no error message"
+        Left (GMEString s) -> return $ Left $ "ghc-mod: " ++ s
+        Left (GMECabalConfigure s) -> return $ Left $ "ghc-mod: " ++ s
+        Right s -> case lines s of
+          [] -> return $ Left "No value at point."
+          x:_ -> do
+            msgEditor $ "x: " ++ x
+            let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
+            msgEditor $ "t: " ++ t
+            case head $ words t of
+              '[':_ -> return $ Right HList
+              x' -> if "->" `isInfixOf` t -- function pre-split
+                    then return $ Right HFunc
+                    else do
+                      msgEditor $ fn ++ " -- " ++ n ++ " -- " ++ x'
+                      inf <- io $ getTypeInfo defaultOptions fn n x'
+                      return $ if ":Error:" `isInfixOf` inf
+                        then Left inf
+                        else Right . processType . extractDataType $ lines inf
 
 -- | Wrapper around 'infoExpr' which will follow ‘type’ declarations before
 -- settling for something.
-getTypeInfo :: Options -> Cradle -> FilePath -> ModuleString
+getTypeInfo :: Options -> FilePath -> ModuleString
             -> Expression -> IO String
-getTypeInfo o c fp m e = do
-  inf <- infoExpr o c fp m e
-  let tname = fst . extractDataType $ lines inf
-  if "type " `isPrefixOf` inf
-    then infoExpr o c fp m tname
-    else return inf
+getTypeInfo o fp m e = do
+  (inf, _) <- runGhcModT o (info fp e)
+  case inf of
+    Left e' -> return $ show e'
+    Right s -> do
+      let tname = fst . extractDataType $ lines s
+      if "type " `isPrefixOf` s
+        then getTypeInfo o fp m tname
+        else return s
 
 -- | Here we further process the type returned to us. We can't case split on
 -- on everything and GhcMod won't take anything paramerised to begin with
