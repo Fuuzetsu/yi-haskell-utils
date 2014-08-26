@@ -26,4 +26,5 @@ library
   other-modules:       Yi.Mode.Haskell.Utils.Internal
 
   build-depends:       base >=4.6 && <5, yi >=0.8, split, ghc-mod >=5.0.0,
-                       PastePipe >= 1.5, network, binary, data-default, derive, lens
+                       PastePipe >= 1.5, network, binary, data-default, derive, lens,
+                       yi-language >= 0.1.0.2
