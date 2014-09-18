@@ -1,5 +1,5 @@
 name:                yi-haskell-utils
-version:             0.1.0.1
+version:             0.1.0.2
 synopsis:            Collection of functions for working with Haskell in Yi
 description:         Collection of utility functions for working with Haskell
                      in Yi. Perhaps the contents of this project should go
