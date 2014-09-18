@@ -1,3 +1,6 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 -- |
 -- Module      :  Yi.Mode.Haskell.Utils.Internal
 -- Copyright   :  (c) Mateusz Kowalczyk 2013
@@ -13,11 +16,15 @@ import           Control.Monad (liftM)
 import           Data.Char (isDigit)
 import           Data.List
 import           Data.List.Split
-import           Text.Read (readMaybe)
+import           Data.Monoid
+import qualified Data.Text as T
 import           Language.Haskell.GhcMod
+import           Text.Read (readMaybe)
 import           Yi
-import           Yi.Utils (io)
 import qualified Yi.Mode.Interactive as Interactive
+import qualified Yi.Rope as R
+import           Yi.String (showT)
+import           Yi.Utils (io)
 
 -- | Function name and string representing the type.
 type HFunction = (String, String)
@@ -33,16 +40,19 @@ type HDataType = (String, [HConstr])
 data HType = HList | HChar | HDT HDataType
            | HNum | HFunc deriving (Show, Eq)
 
-getModuleName :: YiM (Either String ModuleString)
+getModuleName :: YiM (Either T.Text ModuleString)
 getModuleName = do
-  c <- filter ("module " `isPrefixOf`) . lines <$> withBuffer elemsB
-  return $ case c of
+  bufLines <- T.lines . R.toText <$> withBuffer elemsB
+  return $ case mods bufLines of
     [] -> Left "Couldn't find the module name in the file."
-    (x:_) -> Right . takeWhile (/= ' ') . tail $ dropWhile (/= ' ') x
+    (x:_) -> Right . T.unpack . T.takeWhile (/= ' ') $ dropMod x
+  where
+    dropMod = T.drop (T.length "module ")
+    mods x = filter (T.isPrefixOf "module ") x
 
 -- | Decide how to possible break up the types.
 -- For now we just blindly insert identifiers.
-breakType :: HType -> Either String [String]
+breakType :: HType -> Either T.Text [String]
 breakType HList = Right ["[]", "(x:xs)"]
 breakType HChar = Left "Can't case-split on a character type."
 breakType HNum = Left "Can't case-split on a number type."
@@ -51,9 +61,9 @@ breakType (HDT (_, cs)) =
   Right $ map repArgs cs
   where
     repArgs (cn, 0) = cn
-    repArgs (cn, ar) = "(" ++ cn ++ " " ++ mkv ar ++ ")"
-
-    mkv n = unwords $ zipWith (\x y -> x : show y) (replicate n 'x') [1 .. ]
+    repArgs (cn, ar) = "(" <> cn <> " " <> mkv ar <> ")"
+    i = [1 .. ] :: [Int]
+    mkv n = unwords $ zipWith (\x y -> x : show y) (replicate n 'x') i
 
 -- | If possible, naively case splits at the variable at point.
 --
@@ -68,7 +78,7 @@ caseSplitAtPoint = do
     Right xs -> do
       cc <- withBuffer curCol
       cl <- withBuffer curLn
-      let (y:ys) = reverse xs
+      let (y:ys) = R.fromString <$> reverse xs
           -- We don't duplicate line for last case
           act = reverse $ (y, return ()) : zip ys (repeat duplicateUnder)
 
@@ -114,35 +124,34 @@ duplicateUnder = do
     moveToLineColB curL cc
 
 -- | Uses GhcMod to get the type of the thing at point
-getTypeAtPoint :: YiM (Either String HType)
-getTypeAtPoint = do
-  mn <- getModuleName
-  case mn of
-    Left err -> return $ Left err
-    Right n -> do
-      BufferFileInfo fn _ ln cl _ _ _ <- withBuffer bufInfoB
-      msgEditor $ fn ++ ":" ++ n ++ ":" ++ show ln ++ ":" ++ show cl
-      (ts, _) <- io $ runGhcModT defaultOptions (types fn ln cl)
-      case ts of
-        Left GMENoMsg -> return $ Left "ghc-mod failed with no error message"
-        Left (GMEString s) -> return $ Left $ "ghc-mod: " ++ s
-        Left (GMECabalConfigure s) -> return $ Left $ "ghc-mod: " ++ s
-        Right s -> case lines s of
-          [] -> return $ Left "No value at point."
-          x:_ -> do
-            msgEditor $ "x: " ++ x
-            let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
-            msgEditor $ "t: " ++ t
-            case head $ words t of
-              '[':_ -> return $ Right HList
-              x' -> if "->" `isInfixOf` t -- function pre-split
-                    then return $ Right HFunc
-                    else do
-                      msgEditor $ fn ++ " -- " ++ n ++ " -- " ++ x'
-                      inf <- io $ getTypeInfo defaultOptions fn n x'
-                      return $ if ":Error:" `isInfixOf` inf
-                        then Left inf
-                        else Right . processType . extractDataType $ lines inf
+getTypeAtPoint :: YiM (Either T.Text HType)
+getTypeAtPoint = getModuleName >>= \case
+  Left err -> return $ Left err
+  Right n -> do
+    BufferFileInfo fn _ ln cl _ _ _ <- withBuffer bufInfoB
+    msgEditor $ T.pack fn <> ":" <> T.pack n <> ":" <> showT ln <> ":" <> showT cl
+    (ts, _) <- io $ runGhcModT defaultOptions (types fn ln cl)
+    case ts of
+      Left GMENoMsg -> return $ Left "ghc-mod failed with no error message"
+      Left (GMEString s) -> return $ Left $ "ghc-mod: " <> T.pack s
+      Left (GMECabalConfigure s) -> return . Left $ "ghc-mod: " <> T.pack s
+      Right s -> case lines s of
+        [] -> return $ Left "No value at point."
+        x:_ -> do
+          msgEditor $ "x: " <> T.pack x
+          let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
+          msgEditor $ "t: " <> T.pack t
+          case head $ words t of
+            '[':_ -> return $ Right HList
+            x' -> if "->" `isInfixOf` t -- function pre-split
+                  then return $ Right HFunc
+                  else do
+                    msgEditor $ T.pack fn <> " -- " <> T.pack n
+                                <> " -- " <> T.pack x'
+                    inf <- io $ getTypeInfo defaultOptions fn n x'
+                    return $ if ":Error:" `T.isInfixOf` T.pack inf
+                      then Left $ T.pack inf
+                      else Right . processType . extractDataType $ lines inf
 
 -- | Wrapper around 'infoExpr' which will follow ‘type’ declarations before
 -- settling for something.
@@ -178,14 +187,14 @@ processType dt
 -- We use this as a helper for 'ghciInsertMissingTypes'
 getFuncDefLoc :: HFunction -> BufferRef -> YiM (Maybe (String, Int))
 getFuncDefLoc (funcName, t) g = do
-  infoReply <- Interactive.queryReply g (":info " ++ funcName)
-  let f :: String -> Maybe Int
-      f = readMaybe . reverse . takeWhile isDigit
-          . tail . dropWhile (/= ':') . reverse
+  infoReply <- Interactive.queryReply g (":info " <> funcName)
+  let f :: R.YiString -> Maybe Int
+      f = readMaybe . T.unpack . T.reverse . T.takeWhile isDigit
+          . T.tail . T.dropWhile (/= ':') . T.reverse . R.toText
 
   return $ case f infoReply of
     Nothing -> Nothing
-    Just r -> Just (funcName ++ " :: " ++ t, r)
+    Just r -> Just (funcName <> " :: " <> t, r)
 
 
 -- | Takes an \n-separated output of @:browse@ and returns a list of 'HFunction'
@@ -240,5 +249,5 @@ joinSplits [] = []
 joinSplits (x:xs) = Prelude.foldl comb [x] xs
   where
     comb :: [String] -> String -> [String]
-    comb xs' (' ':y) = init xs' ++ [last xs' ++ y]
-    comb xs' y = xs' ++ [y]
+    comb xs' (' ':y) = init xs' <> [last xs' <> y]
+    comb xs' y = xs' <> [y]

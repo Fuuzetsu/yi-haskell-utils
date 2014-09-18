@@ -1,5 +1,5 @@
 name:                yi-haskell-utils
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            Collection of functions for working with Haskell in Yi
 description:         Collection of utility functions for working with Haskell
                      in Yi. Perhaps the contents of this project should go
@@ -27,4 +27,4 @@ library
 
   build-depends:       base >=4.6 && <5, yi >=0.8, split, ghc-mod >=5.0.0,
                        PastePipe >= 1.5, network, binary, data-default, derive, lens,
-                       yi-language >= 0.1.0.2
+                       yi-language >= 0.1.0.2, text, yi-rope
