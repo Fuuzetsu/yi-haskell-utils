@@ -42,7 +42,7 @@ data HType = HList | HChar | HDT HDataType
 
 getModuleName :: YiM (Either T.Text ModuleString)
 getModuleName = do
-  bufLines <- T.lines . R.toText <$> withBuffer elemsB
+  bufLines <- T.lines . R.toText <$> withCurrentBuffer elemsB
   return $ case mods bufLines of
     [] -> Left "Couldn't find the module name in the file."
     (x:_) -> Right . T.unpack . T.takeWhile (/= ' ') $ dropMod x
@@ -73,22 +73,22 @@ caseSplitAtPoint :: YiM ()
 caseSplitAtPoint = do
   t <- getTypeAtPoint
   case t >>= breakType of
-    Left e -> msgEditor e
+    Left e -> printMsg e
     Right [] -> return ()
     Right xs -> do
-      cc <- withBuffer curCol
-      cl <- withBuffer curLn
+      cc <- withCurrentBuffer curCol
+      cl <- withCurrentBuffer curLn
       let (y:ys) = R.fromString <$> reverse xs
           -- We don't duplicate line for last case
           act = reverse $ (y, return ()) : zip ys (repeat duplicateUnder)
 
       mapM_ (f cc) act
-      withBuffer $ moveToLineColB cl cc
+      withCurrentBuffer $ moveToLineColB cl cc
       fwriteE -- save after splits
   where
     f c (case', a) = do
       _ <- a
-      withBuffer $ do
+      withCurrentBuffer $ do
         bkillWordB
         insertN case'
         lineDown
@@ -115,7 +115,7 @@ baz
 -}
 duplicateUnder :: YiM ()
 duplicateUnder = do
-  withBuffer $ do
+  withCurrentBuffer $ do
     cc <- curCol -- remember column position
     curL <- curLn
     cl <- readLnB -- get current line
@@ -128,25 +128,24 @@ getTypeAtPoint :: YiM (Either T.Text HType)
 getTypeAtPoint = getModuleName >>= \case
   Left err -> return $ Left err
   Right n -> do
-    BufferFileInfo fn _ ln cl _ _ _ <- withBuffer bufInfoB
-    msgEditor $ T.pack fn <> ":" <> T.pack n <> ":" <> showT ln <> ":" <> showT cl
+    BufferFileInfo fn _ ln cl _ _ _ <- withCurrentBuffer bufInfoB
+    printMsg $ T.pack fn <> ":" <> T.pack n <> ":" <> showT ln <> ":" <> showT cl
     (ts, _) <- io $ runGhcModT defaultOptions (types fn ln cl)
     case ts of
-      Left GMENoMsg -> return $ Left "ghc-mod failed with no error message"
-      Left (GMEString s) -> return $ Left $ "ghc-mod: " <> T.pack s
-      Left (GMECabalConfigure s) -> return . Left $ "ghc-mod: " <> T.pack s
+      Left s -> return . Left $
+                "ghc-mod: " <> T.pack "ghc-mod failed with no error message"
       Right s -> case lines s of
         [] -> return $ Left "No value at point."
         x:_ -> do
-          msgEditor $ "x: " <> T.pack x
+          printMsg $ "x: " <> T.pack x
           let t = reverse . takeWhile (/= '"') . drop 1 $ reverse x
-          msgEditor $ "t: " <> T.pack t
+          printMsg $ "t: " <> T.pack t
           case head $ words t of
             '[':_ -> return $ Right HList
             x' -> if "->" `isInfixOf` t -- function pre-split
                   then return $ Right HFunc
                   else do
-                    msgEditor $ T.pack fn <> " -- " <> T.pack n
+                    printMsg $ T.pack fn <> " -- " <> T.pack n
                                 <> " -- " <> T.pack x'
                     inf <- io $ getTypeInfo defaultOptions fn n x'
                     return $ if ":Error:" `T.isInfixOf` T.pack inf

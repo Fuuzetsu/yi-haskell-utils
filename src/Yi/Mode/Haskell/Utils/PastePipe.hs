@@ -37,6 +37,7 @@ import           Yi.MiniBuffer
 import           Yi.Monad (gets)
 import qualified Yi.Rope as R
 import           Yi.String (showT)
+import           Yi.Types (YiVariable)
 import           Yi.Utils (io)
 
 -- | Config used to use as 'YiVariable'.
@@ -57,17 +58,17 @@ instance YiVariable PastePipeConfig
 -- the default values set by PastePipe's 'config' function.
 lpasteBufferDefaults :: YiM ()
 lpasteBufferDefaults = do
-  fn <- withBuffer (gets file)
-  withBuffer (use bufferDynamicValueA) >>= \case
+  fn <- withCurrentBuffer (gets file)
+  withCurrentBuffer getBufferDyn >>= \case
     PastePipeConfig Nothing l -> do
       user <- io $ getEnv "USER"
       let c = (config user) { language = l
                             , title = maybe "PipePaste pasted text" id fn }
-      withBuffer elemsB >>= go c >>= msgEditor . T.pack
+      withCurrentBuffer elemsB >>= go c >>= printMsg . T.pack
     PastePipeConfig (Just n) l ->
       let c = (config n) { language = l
                          , title = maybe "PipePaste pasted text" id fn }
-      in getContent >>= go c >>= msgEditor . T.pack
+      in getContent >>= go c >>= printMsg . T.pack
   where
     go c = io . catchP . fmap show . post c . R.toString
 
@@ -79,7 +80,7 @@ lpasteBufferDefaults = do
 lpasteWithPrompt :: YiM ()
 lpasteWithPrompt = do
   userEnv <- io $ getEnv "USER"
-  PastePipeConfig n _ <- withBuffer (use bufferDynamicValueA)
+  PastePipeConfig n _ <- withCurrentBuffer getBufferDyn
   let users = T.pack <$> case n of
         Nothing -> [userEnv]
         Just x -> [userEnv, x]
@@ -93,18 +94,18 @@ lpasteWithPrompt = do
 -- values.
 lpasteCustom :: String -> Maybe String -> String -> YiM ()
 lpasteCustom u t l = do
-  c <- withBuffer getSelectRegionB >>= \r ->
-    withBuffer $ if regionStart r == regionEnd r
+  c <- withCurrentBuffer getSelectRegionB >>= \r ->
+    withCurrentBuffer $ if regionStart r == regionEnd r
       then elemsB
       else readRegionB r
   let conf = (config u) { title = maybe "PipePaste pasted text" id t
                         , language = l }
-  io (post conf $ R.toString c) >>= msgEditor . showT
+  io (post conf $ R.toString c) >>= printMsg . showT
 
 -- | If we have a region selected, we return that. If not, we return the full
 -- file.
 getContent :: YiM R.YiString
-getContent = withBuffer getSelectRegionB >>= \r ->
-  withBuffer $ if regionStart r == regionEnd r
-               then elemsB
-               else readRegionB r
+getContent = withCurrentBuffer getSelectRegionB >>= \r ->
+  withCurrentBuffer $ if regionStart r == regionEnd r
+                      then elemsB
+                      else readRegionB r

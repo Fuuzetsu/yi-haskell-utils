@@ -33,7 +33,7 @@ import qualified Yi.Rope as R
 ghciLoadBufferBool :: YiM Bool
 ghciLoadBufferBool = do
   fwriteE
-  f <- withBuffer (gets file)
+  f <- withCurrentBuffer (gets file)
   case f of
     Nothing -> return False
     Just filename -> do
@@ -50,7 +50,7 @@ ghciInsertMissingTypes = do
     True -> do
       buf <- ghciGet
       result <- Interactive.queryReply buf ":browse"
-      bufContent <- withBuffer elemsB
+      bufContent <- withCurrentBuffer elemsB
       let funcs = extractFunctions . map R.toString $ R.lines result
           bufferFuncs = extractFunctions . map R.toString $ R.lines bufContent
           bufFuncNames = map fst bufferFuncs
@@ -67,4 +67,4 @@ ghciInsertMissingTypes = do
           increasedLocs = incSecond 0 sortedLocs
           putSig (s, i) = moveToLineColB i 0 >> newlineB
                           >> gotoLnFrom (-1) >> insertN s
-      mapM_ (withBuffer . putSig) increasedLocs
+      mapM_ (withCurrentBuffer . putSig) increasedLocs
