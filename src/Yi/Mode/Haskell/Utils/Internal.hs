@@ -12,7 +12,7 @@
 module Yi.Mode.Haskell.Utils.Internal where
 
 import           Control.Applicative ((<$>))
-import           Control.Monad (liftM)
+import           Control.Monad (liftM, void)
 import           Data.Char (isDigit)
 import           Data.List
 import           Data.List.Split
@@ -84,7 +84,7 @@ caseSplitAtPoint = do
 
       mapM_ (f cc) act
       withCurrentBuffer $ moveToLineColB cl cc
-      fwriteE -- save after splits
+      void fwriteE -- save after splits
   where
     f c (case', a) = do
       _ <- a
